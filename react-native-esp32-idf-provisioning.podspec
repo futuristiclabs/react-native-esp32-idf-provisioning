@@ -36,6 +36,7 @@ Pod::Spec.new do |s|
     s.dependency "RCTRequired"
     s.dependency "RCTTypeSafety"
     s.dependency "ReactCommon/turbomodule/core"
+    s.dependency "ESPProvision", :git => "https://github.com/espressif/esp-idf-provisioning-ios.git", :tag => "2.1.1"
    end
   end    
 end

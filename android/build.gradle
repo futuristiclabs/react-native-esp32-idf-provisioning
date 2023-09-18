@@ -89,6 +89,8 @@ dependencies {
   // For > 0.71, this will be replaced by `com.facebook.react:react-android:$version` by react gradle plugin
   //noinspection GradleDynamicVersion
   implementation "com.facebook.react:react-native:+"
+  implementation "org.greenrobot:eventbus:3.3.1"
+  implementation 'com.github.espressif:esp-idf-provisioning-android:lib-2.1.2'
 }
 
 if (isNewArchitectureEnabled()) {
@@ -97,4 +99,10 @@ if (isNewArchitectureEnabled()) {
     libraryName = "Esp32IdfProvisioning"
     codegenJavaPackageName = "com.esp32idfprovisioning"
   }
+}
+
+allprojects {
+    repositories {
+   	 maven { url 'https://jitpack.io' }
+    }
 }
