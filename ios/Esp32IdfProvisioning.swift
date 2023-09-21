@@ -188,9 +188,6 @@ class Esp32IdfProvisioning: RCTEventEmiter {
             return
         }
 
-
-
-
     }
 
 
