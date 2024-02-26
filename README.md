@@ -110,7 +110,8 @@ import EspIdfProvisioning from 'react-native-esp-idf-provisioning';
 
 ### License
 ```plaintext
-Copyright © 2021 Futuristic Labs Private Limited. All rights reserved.
+Copyright © 2021 Futuristic Labs Private Limited. All rights reserved. 
+We will make it open source soon, once we have a stable version.
 ```
 
 
