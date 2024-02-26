@@ -83,3 +83,27 @@ Message: Provisioning confirmation or error message.
 Message: Disconnect request.
 10. **ESP32 Device -> Mobile App (Optional)**:
 Message: Disconnect confirmation.
+
+
+### Installation
+
+Currently, this package is not published on npm and needs to be included manually.
+
+1. Clone this repository into your React Native project's node_modules folder.
+2. Update your package.json file:
+
+```json
+{
+  "dependencies": {
+    "react-native-esp-idf-provisioning": "file:node_modules/react-native-esp-idf-provisioning"
+  }
+}
+```
+
+### Usage:
+
+Import the module in your React Native component:
+
+```javascript
+import EspIdfProvisioning from 'react-native-esp-idf-provisioning';
+```
