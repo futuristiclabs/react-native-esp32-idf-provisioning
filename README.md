@@ -107,3 +107,11 @@ Import the module in your React Native component:
 ```javascript
 import EspIdfProvisioning from 'react-native-esp-idf-provisioning';
 ```
+
+### License
+```plaintext
+Copyright © 2021 Futuristic Labs Private Limited. All rights reserved.
+```
+
+
+
