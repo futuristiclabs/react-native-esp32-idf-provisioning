@@ -1,241 +1,258 @@
-import React
+//
+//  EspIdfProvisioning.swift
+//  react-native-esp-idf-provisioning
+//
+//  Created by Mateo Gianolio on 2023-09-18.
+//
+
+import Foundation
 import ESPProvision
-import CoreBluetooth
 
-let REQUEST_ENABLE_BT = 1
+@objc(EspIdfProvisioning)
+class EspIdfProvisioning: NSObject {
+    // Think we need to keep a dictionary of espDevices since we can't pass native
+    // classes to react-native
+    var espDevices: [String : ESPDevice] = [:]
 
-let BLE_SCAN_COMPLETED = 1
-let BLE_SCAN_FAILED = 0
-let WIFI_SCAN_FAILED = 0
+    @objc(searchESPDevices:transport:security:resolve:reject:)
+    func searchESPDevices(devicePrefix: String, transport: String, security: Int, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
+        let transport = ESPTransport(rawValue: transport) ?? ESPTransport.ble
+        let security = ESPSecurity(rawValue: security)
 
-let DEVICE_CONNECTED = 1
-let DEVICE_CONNECTION_FAILED = 2
-let DEVICE_DISCONNECTED = 3
+        self.espDevices.removeAll()
+        
+        var invoked = false
+        ESPProvisionManager.shared.searchESPDevices(devicePrefix: devicePrefix, transport: transport, security: security) { espDevices, error in
+            // Prevent multiple callback invokation error 
+            guard !invoked else { return }
 
-let PROV_INIT_FAILED = 0
-let PROV_CONFIG_FAILED = 2
-let PROV_CONFIG_APPLIED = 3
-let PROV_APPLY_FAILED = 4
-let PROV_COMPLETED = 5
-let PROV_FAILED = 6
-
-let EVENT_SCAN_BLE = "scanBle"
-let EVENT_SCAN_WIFI = "scanWifi"
-let EVENT_CONNECT_DEVICE = "connection"
-let EVENT_PROV = "provisioning"
-let EVENT_PERMISSION = "permission"
-
-let PERM_UNKNOWN = 0
-let PERM_NA = -1
-let PERM_DENIED = 2
-let PERM_ALLOWED = 3
-
-@objc(Esp32IdfProvisioning)
-class Esp32IdfProvisioning: RCTEventEmiter {
-
-  var manager: CBPeripheralManager?
-    var isObserving = false
-    var bleDevices:[ESPDevice]?
-    var espDevice: ESPDevice?
-    var pop = ""
-    var isScanning = false
-
-    override func startObserving() {
-        isObserving = true
-    }
-
-    override func stopObserving() {
-        isObserving = false
-    }
-
-    override func sendEvent(withName name: String!, body: Any!) {
-        if (isObserving) {
-            super.sendEvent(withName: name, body: body)
-        }
-    }
-
-    override func supportedEvents() -> [String]! {
-        return [EVENT_SCAN_BLE, EVENT_CONNECT_DEVICE, EVENT_SCAN_WIFI, EVENT_PERMISSION, EVENT_PROV]
-    }
-
-    func checkPermissions() -> Bool {
-        var ret = false
-        if #available(iOS 13.1, *) {
-            switch CBManager.authorization {
-            case .allowedAlways, .restricted:
-                ret = true
-            default:
-                break
-            }
-          } else {
-            switch CBPeripheralManager.authorizationStatus() {
-            case .authorized, .restricted:
-                ret = true
-            default:
-                break
-            }
-          }
-        return ret
-    }
-
-    @objc(checkPermissions:reject:)
-    func checkPermissions(resolve: RCTPromiseResolveBlock, reject: RCTPromiseRejectBlock) {
-        let ret = checkPermissions()
-        resolve(ret)
-        if (!ret && manager == nil) {
-            manager = CBPeripheralManager(delegate: self, queue: nil, options: [CBPeripheralManagerOptionShowPowerAlertKey: true])
-        }
-    }
-
-    @objc(startBleScan:resolve:reject:)
-    func startBleScan(prefix: String?, resolve: RCTPromiseResolveBlock, reject: RCTPromiseRejectBlock) {
-        print("Searching for BLE Devices..")
-        if (!checkPermissions() || isScanning) {
-            resolve(false)
-            return
-        }
-        isScanning = true
-        resolve(true)
-        ESPProvisionManager.shared.searchESPDevices(devicePrefix: prefix ?? "", transport: .ble) { bleDevices, error in
-            if (!self.isScanning) {
+            if error != nil {
+                reject("error", error?.description, nil)
+                invoked = true
                 return
             }
-            self.isScanning = false
-            self.bleDevices = bleDevices
+
+            espDevices?.forEach {
+                self.espDevices[$0.name] = $0
+            }
+
+            resolve(espDevices!.map {[
+                "name": $0.name,
+                "advertisementData": $0.advertisementData ?? [],
+                "capabilities": $0.capabilities ?? [],
+                "security": $0.security.rawValue,
+                "transport": $0.transport.rawValue,
+                "username": $0.username as Any,
+                "versionInfo": $0.versionInfo ?? {}
+            ]})
+            invoked = true
+        }
+    }
+
+    @objc(stopESPDevicesSearch)
+    func stopESPDevicesSearch() {
+        ESPProvisionManager.shared.stopESPDevicesSearch()
+    }
+
+    @objc(createESPDevice:transport:security:proofOfPossession:softAPPassword:username:resolve:reject:)
+    func createESPDevice(deviceName: String, transport: String, security: Int, proofOfPossession: String? = nil, softAPPassword: String? = nil, username: String? = nil, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
+        let transport = ESPTransport(rawValue: transport) ?? ESPTransport.ble
+        let security = ESPSecurity(rawValue: security)
+
+        var invoked = false
+        ESPProvisionManager.shared.createESPDevice(deviceName: deviceName, transport: transport, security: security, proofOfPossession: proofOfPossession, softAPPassword: softAPPassword, username: username) { espDevice, error in
+            // Prevent multiple callback invokation error
+            guard !invoked else { return }
+
             if error != nil {
-                self.sendEvent(withName: EVENT_SCAN_BLE, body: ["status": BLE_SCAN_FAILED])
-            } else {
-                let devices = bleDevices!.map({ (device) -> [String: String] in
-                    //add serviceUuid to match Android API
-                    ["deviceName": device.name, "serviceUuid": device.name]
-                })
-                self.sendEvent(withName: EVENT_SCAN_BLE, body: devices)
-                self.sendEvent(withName: EVENT_SCAN_BLE, body: ["status": BLE_SCAN_COMPLETED])
+                reject("error", error?.description, nil)
+                invoked = true
+                return
             }
+
+            self.espDevices[espDevice!.name] = espDevice
+
+            resolve([
+                "name": espDevice!.name,
+                "advertisementData": espDevice!.advertisementData ?? [],
+                "capabilities": espDevice!.capabilities ?? [],
+                "security": espDevice!.security.rawValue,
+                "transport": espDevice!.transport.rawValue,
+                "username": espDevice!.username as Any,
+                "versionInfo": espDevice!.versionInfo ?? {}
+            ])
+            invoked = true
         }
     }
 
-    @objc(stopBleScan)
-    func stopBleScan() {
-        isScanning = false
-    }
-
-    @objc(connectDevice:pop:resolve:reject:)
-    func connectDevice(name: String, pop: String? = nil, resolve: RCTPromiseResolveBlock, reject: RCTPromiseRejectBlock) {
-        self.pop = pop ?? ""
-        espDevice = bleDevices?.first(where: { esp -> Bool in esp.name == name})
-        if (espDevice == nil) {
-            reject("NO_DEVICE", "Can't find the device: \(name).", nil)
-            return
-        }
-        resolve(true)
-        espDevice?.security = pop == nil ? .unsecure : .secure
-        espDevice?.connect(delegate: self) { status in
-            let data: Any
-            switch status {
-            case .connected:
-                data = ["status": DEVICE_CONNECTED]
-            case let .failedToConnect(error):
-                var errorDescription = ""
-                switch error {
-                case .securityMismatch, .versionInfoError:
-                    errorDescription = error.description
-                default:
-                    errorDescription = error.description + "\nCheck if POP is correct."
-                }
-                data = ["status": DEVICE_CONNECTION_FAILED, "message": errorDescription]
-            default:
-                data = ["status": DEVICE_DISCONNECTED]
-            }
-            self.sendEvent(withName: EVENT_CONNECT_DEVICE, body: data)
-        }
-    }
-
-    @objc(connectWifiDevice:pop:password:resolve:reject:)
-    func connectWifiDevice(deviceName:String,pop:String? = nil,password:String?=nil,resolve: RCTPromiseResolveBlock, reject: RCTPromiseRejectBlock){
-        self.pop = pop ?? ""
-        let transport:ESPTransport = .softap
-        let security:ESPSecurity = .secure
-        resolve(true)
-        ESPProvisionManager.shared.createESPDevice(deviceName: deviceName, transport: transport, security: security,proofOfPossession: pop,softAPPassword: password){ espDeviceInstance, _ in
-        self.espDevice = espDeviceInstance
-
-        self.espDevice?.connect(delegate: self) { status in
-            let data: Any
-            print("connectionStatus",status)
-            switch status {
-            case .connected:
-                data = ["status": DEVICE_CONNECTED]
-            case let .failedToConnect(error):
-                var errorDescription = ""
-                switch error {
-                case .securityMismatch, .versionInfoError:
-                    errorDescription = error.description
-                default:
-                    errorDescription = error.description + "\nCheck if POP is correct."
-                }
-                data = ["status": DEVICE_CONNECTION_FAILED, "message": errorDescription]
-            default:
-                data = ["status": DEVICE_DISCONNECTED]
-            }
-            self.sendEvent(withName: EVENT_CONNECT_DEVICE, body: data)
-        }
-
-
-        }
-        if (espDevice == nil) {
-            reject("NO_DEVICE", "Can't find the device: \(deviceName).", nil)
+    @objc(connect:resolve:reject:)
+    func connect(deviceName: String, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
+        if self.espDevices[deviceName] == nil {
+            reject("error", "No ESP device found. Call createESPDevice first.", nil)
             return
         }
 
-    }
+        var invoked = false
+        espDevices[deviceName]!.connect(completionHandler: { status in
+            // Prevent multiple callback invokation error
+            guard !invoked else { return }
 
-
-    @objc(disconnectDevice)
-    func disconnectDevice() {
-        espDevice?.disconnect()
-    }
-
-    @objc(startWifiScan:reject:)
-    func startWifiScan(resolve: RCTPromiseResolveBlock, reject: RCTPromiseRejectBlock) {
-        espDevice?.scanWifiList { wifiList, err in
-            if (err != nil) {
-                self.sendEvent(withName: EVENT_SCAN_WIFI, body:
-                                ["status": WIFI_SCAN_FAILED, "message": err!.description])
+            switch status {
+            case .connected:
+                resolve([
+                    "status": "connected"
+                ])
+                invoked = true
+            case .failedToConnect(let error):
+                reject("error", error.description, nil)
+                invoked = true
+            case .disconnected:
+                reject("error", "Device disconnected.", nil)
+                invoked = true
             }
-            else if let list = wifiList {
-                let _list = list.sorted { $0.rssi > $1.rssi }.map { wifi in
-                    ["ssid": wifi.ssid, "auth": wifi.auth, "rssi": wifi.rssi]
+        })
+    }
+
+    @objc(sendData:path:data:resolve:reject:)
+    func sendData(deviceName: String, path: String, data: String, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
+        if self.espDevices[deviceName] == nil {
+            reject("error", "No ESP device found. Call createESPDevice first.", nil)
+            return
+        }
+
+        let data: Data = data.data(using: .utf8)!
+        if let data = Data(base64Encoded: data) {
+            var invoked = false
+            self.espDevices[deviceName]!.sendData(path: path, data: data, completionHandler: { data, error in
+                // Prevent multiple callback invokation error
+                guard !invoked else { return }
+
+                if error != nil {
+                    reject("error", error?.description, nil)
+                    invoked = true
+                    return
                 }
-                self.sendEvent(withName: EVENT_SCAN_WIFI, body: ["wifiList": _list])
-            }
+
+                resolve(data!.base64EncodedString())
+                invoked = true
+            })
+        } else {
+            reject("error", "Data is not base64 encoded.",  nil)
         }
     }
 
-    @objc(doProvisioning:passPhrase:resolve:reject:)
-    func doProvisioning(ssid: String, passPhrase: String = "", resolve: RCTPromiseResolveBlock, reject: RCTPromiseRejectBlock) {
-        espDevice?.provision(ssid: ssid, passPhrase: passPhrase) { status in
-            let ret: Any
+    @objc(isSessionEstablished:)
+    func isSessionEstablished(deviceName: String) -> Bool {
+        if self.espDevices[deviceName] == nil {
+            return false
+        }
+
+        return self.espDevices[deviceName]!.isSessionEstablished()
+    }
+
+    @objc(getProofOfPossession:resolve:reject:)
+    func getProofOfPossession(deviceName: String, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
+        if self.espDevices[deviceName] == nil {
+            reject("error", "No ESP device found. Call createESPDevice first.", nil)
+            return
+        }
+
+        var invoked = false
+        self.espDevices[deviceName]!.delegate?.getProofOfPossesion(forDevice: self.espDevices[deviceName]!, completionHandler: { proofOfPossession in
+            // Prevent multiple callback invokation error
+            guard !invoked else { return }
+
+            resolve(proofOfPossession)
+            invoked = true
+        })
+    }
+
+    @objc(scanWifiList:resolve:reject:)
+    func scanWifiList(deviceName: String, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
+        if self.espDevices[deviceName] == nil {
+            reject("error", "No ESP device found. Call createESPDevice first.", nil)
+            return
+        }
+
+        var invoked = false
+        self.espDevices[deviceName]!.scanWifiList(completionHandler: { wifiList, error in
+            // Prevent multiple callback invokation error
+            guard !invoked else { return }
+
+            if error != nil {
+                // Ignore error as per https://github.com/orbital-systems/react-native-esp-idf-provisioning/issues/22
+                // and https://github.com/espressif/esp-idf-provisioning-ios/issues/74
+                return
+            }
+
+            resolve(wifiList!.map {[
+                "ssid": $0.ssid,
+                "bssid": $0.bssid.toHexString(),
+                "rssi": $0.rssi,
+                "auth": $0.auth.rawValue,
+                "channel": $0.channel
+            ]})
+            invoked = true
+        })
+    }
+
+    @objc(disconnect:)
+    func disconnect(deviceName: String) {
+        self.espDevices[deviceName]?.disconnect()
+    }
+
+    @objc(provision:ssid:passphrase:resolve:reject:)
+    func provision(deviceName: String, ssid: String, passphrase: String, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
+        if self.espDevices[deviceName] == nil {
+            reject("error", "No ESP device found. Call createESPDevice first.", nil)
+            return
+        }
+
+        var invoked = false
+        self.espDevices[deviceName]!.provision(ssid: ssid, passPhrase: passphrase, completionHandler: { status in
+            // Prevent multiple callback invokation error
+            guard !invoked else { return }
+
             switch status {
             case .success:
-                ret = ["status": PROV_COMPLETED]
-            case let .failure(err):
-                switch err {
-                case .configurationError:
-                    ret = ["status": PROV_CONFIG_FAILED, "message": err.description]
-                case .sessionError:
-                    ret = ["status": PROV_INIT_FAILED, "message": err.description]
-                case .wifiStatusDisconnected:
-                    ret = ["status": PROV_APPLY_FAILED, "message": err.description]
-                default:
-                    ret = ["status": PROV_FAILED, "message": err.description]
-                }
+                resolve([
+                    "status": "success"
+                ])
+                invoked = true
+            case .failure(let error):
+                reject("error", error.description, nil)
+                invoked = true
             case .configApplied:
-                ret = ["status": 3]
+                break
             }
-            self.sendEvent(withName: EVENT_PROV, body: ret)
+        })
+    }
+
+    @objc(initialiseSession:sessionPath:resolve:reject:)
+    func initialiseSession(deviceName: String, sessionPath: String?, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
+        if self.espDevices[deviceName] == nil {
+            reject("error", "No ESP device found. Call createESPDevice first.", nil)
+            return
         }
+
+        var invoked = false
+        self.espDevices[deviceName]!.initialiseSession(sessionPath: sessionPath, completionHandler: { status in
+            // Prevent multiple callback invokation error
+            guard !invoked else { return }
+
+            switch status {
+            case .connected:
+                resolve([
+                    "status": "connected"
+                ])
+                invoked = true
+            case .failedToConnect(let error):
+                reject("error", error.description, nil)
+                invoked = true
+            case .disconnected:
+                reject("error", "Device disconnected.", nil)
+                invoked = true
+            }
+        })
     }
 }
-
-
